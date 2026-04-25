@@ -71,7 +71,7 @@ const ConferenceSection = ({
       <span className="text-[10px] uppercase tracking-widest text-muted-foreground">First Round</span>
     </div>
     <div className="grid gap-5 md:grid-cols-2">
-      {matchups.map((m) => <MatchupCard key={m.id} matchup={m} />)}
+      {matchups.map((m, i) => <MatchupCard key={m.id} matchup={m} index={accent === "east" ? i : i + 4} />)}
     </div>
   </section>
 );
