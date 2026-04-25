@@ -1,5 +1,10 @@
 // deno-lint-ignore-file no-explicit-any
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
@@ -113,7 +118,7 @@ Deno.serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         messages,
         tools,
         tool_choice,
@@ -121,6 +126,8 @@ Deno.serve(async (req) => {
     });
 
     if (!resp.ok) {
+      const t = await resp.text();
+      console.error("Gateway error", resp.status, t);
       if (resp.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit hit. Try again in a moment." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -131,16 +138,17 @@ Deno.serve(async (req) => {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const t = await resp.text();
-      console.error("Gateway error", resp.status, t);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), {
+      return new Response(JSON.stringify({ error: `AI gateway error: ${resp.status}` }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const data = await resp.json();
     const call = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!call) throw new Error("No tool call in response");
+    if (!call) {
+      console.error("No tool call in response", JSON.stringify(data));
+      throw new Error("No tool call in response");
+    }
     const args = JSON.parse(call.function.arguments);
 
     return new Response(JSON.stringify(args), {
