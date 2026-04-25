@@ -19,11 +19,14 @@ const Index = () => {
             </span>
           </div>
           <h1 className="font-display text-5xl md:text-7xl lg:text-8xl leading-[0.9]">
-            Hardwood <span className="text-primary">2026</span>
+            NBA Playoffs <span className="text-primary">2026</span>
+            <span className="block text-2xl md:text-4xl lg:text-5xl text-muted-foreground mt-2">
+              Prediction Dashboard
+            </span>
           </h1>
           <p className="mt-4 text-base md:text-lg text-muted-foreground max-w-2xl">
-            AI-powered series predictions, confidence scores, and rebuttals to your hottest takes.
-            The 2026 NBA Playoffs, decoded matchup by matchup.
+            AI-powered series predictions, confidence scores, and rebuttals to your hottest takes —
+            decoded matchup by matchup.
           </p>
 
           <div className="mt-8 flex items-center gap-6 text-xs text-muted-foreground">
