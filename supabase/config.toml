@@ -1,0 +1,4 @@
+project_id = "obagxsezieccfibrmeiy"
+
+[functions.predict-series]
+verify_jwt = false
