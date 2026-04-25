@@ -23,56 +23,34 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
 
   useEffect(() => {
     let alive = true;
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    (async () => {
-      setLoading(true);
-      setError(null);
+    const body = {
+      mode: "predict",
+      matchup: {
+        conf: matchup.conf,
+        highTeam: high.abbr, highSeed: matchup.highSeed, highRecord: high.record,
+        lowTeam: low.abbr, lowSeed: matchup.lowSeed, lowRecord: low.record,
+        series: matchup.series,
+      },
+    };
 
-      // Stagger initial requests to avoid hitting the AI gateway rate limit.
-      await sleep(index * 700);
-      if (!alive) return;
+    setLoading(true);
+    setError(null);
 
-      const body = {
-        mode: "predict",
-        matchup: {
-          conf: matchup.conf,
-          highTeam: high.abbr, highSeed: matchup.highSeed, highRecord: high.record,
-          lowTeam: low.abbr, lowSeed: matchup.lowSeed, lowRecord: low.record,
-          series: matchup.series,
-        },
-      };
-
-      // Retry on 429 with exponential backoff.
-      const maxAttempts = 4;
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const { data, error } = await supabase.functions.invoke("predict-series", { body });
+    enqueuePrediction(body)
+      .then((data) => {
         if (!alive) return;
-
-        const payloadErr = (data as any)?.error as string | undefined;
-        const isRateLimit =
-          (error as any)?.context?.status === 429 ||
-          /rate limit/i.test(payloadErr ?? "") ||
-          /rate limit/i.test(error?.message ?? "");
-
-        if (!error && !payloadErr) {
-          setPred(data as Prediction);
-          setLoading(false);
-          return;
-        }
-
-        if (isRateLimit && attempt < maxAttempts - 1) {
-          await sleep(1500 * Math.pow(2, attempt) + Math.random() * 400);
-          continue;
-        }
-
-        setError(payloadErr ?? error?.message ?? "Failed to load prediction");
+        setPred(data as Prediction);
         setLoading(false);
-        return;
-      }
-    })();
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(err?.message ?? "Failed to load prediction");
+        setLoading(false);
+      });
+
     return () => { alive = false; };
-  }, [matchup.id, index]);
+  }, [matchup.id]);
 
   const winner = pred?.winnerAbbr === high.abbr ? high : pred?.winnerAbbr === low.abbr ? low : null;
   const seriesLeader =
