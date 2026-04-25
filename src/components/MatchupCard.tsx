@@ -1,11 +1,9 @@
 import { Matchup, TEAMS } from "@/data/playoffs";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Sparkles, TrendingUp, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
 
 type Prediction = {
   winnerAbbr: string;
@@ -13,6 +11,47 @@ type Prediction = {
   confidence: number;
   reasoning: string[];
 };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Module-level serial queue: only one request to the AI gateway in flight
+// at a time, with spacing + retry, so 8 cards never hammer the rate limit.
+let queue: Promise<unknown> = Promise.resolve();
+const REQUEST_SPACING_MS = 1200;
+
+async function enqueuePrediction(body: unknown): Promise<Prediction> {
+  const run = async (): Promise<Prediction> => {
+    const maxAttempts = 5;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const { data, error } = await supabase.functions.invoke("predict-series", { body });
+      const payloadErr = (data as { error?: string } | null)?.error;
+      const status = (error as { context?: { status?: number } } | null)?.context?.status;
+      const isRateLimit =
+        status === 429 ||
+        /rate limit/i.test(payloadErr ?? "") ||
+        /rate limit/i.test(error?.message ?? "");
+
+      if (!error && !payloadErr) {
+        await sleep(REQUEST_SPACING_MS);
+        return data as Prediction;
+      }
+
+      if (isRateLimit && attempt < maxAttempts - 1) {
+        await sleep(2500 * Math.pow(2, attempt) + Math.random() * 500);
+        continue;
+      }
+
+      throw new Error(payloadErr ?? error?.message ?? "Failed to load prediction");
+    }
+    throw new Error("Failed to load prediction");
+  };
+
+  const next = queue.then(run, run);
+  // Keep the queue chain alive even if a request rejects.
+  queue = next.catch(() => undefined);
+  return next;
+}
+
 
 export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: number }) => {
   const high = TEAMS[matchup.highTeam];
