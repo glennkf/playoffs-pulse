@@ -87,11 +87,21 @@ Deno.serve(async (req) => {
         };
       };
 
+      // Fetch live rosters in parallel from BallDontLie (cached per instance).
+      const [highRoster, lowRoster] = await Promise.all([
+        getRoster(matchup.highTeam),
+        getRoster(matchup.lowTeam),
+      ]);
+      const fmtRoster = (abbr: string, players: string[]) =>
+        players.length
+          ? `${abbr} active roster: ${players.slice(0, 18).join(", ")}.`
+          : `${abbr} roster: unavailable — rely on general knowledge.`;
+
       messages = [
         {
           role: "system",
           content:
-            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
+            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). ONLY reference players that appear in the rosters provided in the user message — do not invent or use outdated rosters. Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
         },
         {
           role: "user",
@@ -99,8 +109,12 @@ Deno.serve(async (req) => {
             `2026 NBA Playoffs ${matchup.conf}ern Conference 1st Round.\n` +
             `(${matchup.highSeed}) ${matchup.highTeam} [${matchup.highRecord}] vs ` +
             `(${matchup.lowSeed}) ${matchup.lowTeam} [${matchup.lowRecord}].\n` +
-            `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n` +
-            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period.`,
+            `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n\n` +
+            `CURRENT ROSTERS (from BallDontLie API):\n` +
+            `${fmtRoster(matchup.highTeam, highRoster)}\n` +
+            `${fmtRoster(matchup.lowTeam, lowRoster)}\n` +
+            `Note: Injury data not available — assume listed players are healthy unless widely known otherwise.\n\n` +
+            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period. Reference only players from the rosters above.`,
         },
       ];
 
