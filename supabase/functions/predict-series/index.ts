@@ -16,9 +16,14 @@ const ROSTER_TTL_MS = 15 * 60 * 1000;
 const rosterCache = new Map<string, RosterCache>();
 let teamIdCache: Map<string, number> | null = null;
 
+function bdlHeaders(): HeadersInit {
+  const key = Deno.env.get("BALLDONTLIE_API_KEY");
+  return key ? { Authorization: key } : {};
+}
+
 async function getTeamIds(): Promise<Map<string, number>> {
   if (teamIdCache) return teamIdCache;
-  const resp = await fetch(`${BDL_BASE}/teams`);
+  const resp = await fetch(`${BDL_BASE}/teams`, { headers: bdlHeaders() });
   if (!resp.ok) throw new Error(`BallDontLie teams fetch failed: ${resp.status}`);
   const data = await resp.json();
   const map = new Map<string, number>();
@@ -41,7 +46,7 @@ async function getRoster(teamAbbr: string): Promise<string[]> {
 
     // Free tier: /players supports team_ids[] filter, returns active roster.
     const url = `${BDL_BASE}/players?team_ids[]=${teamId}&per_page=100`;
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: bdlHeaders() });
     if (!resp.ok) {
       console.warn(`Roster fetch failed for ${teamAbbr}: ${resp.status}`);
       return cached?.players ?? [];
