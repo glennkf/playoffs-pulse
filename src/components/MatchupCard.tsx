@@ -60,6 +60,7 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
   const [pred, setPred] = useState<Prediction | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -72,6 +73,8 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
         lowTeam: low.abbr, lowSeed: matchup.lowSeed, lowRecord: low.record,
         series: matchup.series,
       },
+      // On manual regenerate, force the edge function to bypass its roster cache.
+      forceRefreshRoster: refreshKey > 0,
     };
 
     setLoading(true);
@@ -90,7 +93,7 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
       });
 
     return () => { alive = false; };
-  }, [matchup.id]);
+  }, [matchup.id, refreshKey]);
 
   const winner = pred?.winnerAbbr === high.abbr ? high : pred?.winnerAbbr === low.abbr ? low : null;
   const seriesLeader =
