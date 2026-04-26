@@ -7,6 +7,61 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const BDL_BASE = "https://api.balldontlie.io/v1";
+
+// In-memory cache (per edge function instance) for team rosters.
+// Key: team abbreviation (e.g. "BOS"). TTL: 15 minutes.
+type RosterCache = { players: string[]; fetchedAt: number };
+const ROSTER_TTL_MS = 15 * 60 * 1000;
+const rosterCache = new Map<string, RosterCache>();
+let teamIdCache: Map<string, number> | null = null;
+
+async function getTeamIds(): Promise<Map<string, number>> {
+  if (teamIdCache) return teamIdCache;
+  const resp = await fetch(`${BDL_BASE}/teams`);
+  if (!resp.ok) throw new Error(`BallDontLie teams fetch failed: ${resp.status}`);
+  const data = await resp.json();
+  const map = new Map<string, number>();
+  for (const t of data.data ?? []) {
+    if (t.abbreviation && typeof t.id === "number") map.set(t.abbreviation, t.id);
+  }
+  teamIdCache = map;
+  return map;
+}
+
+async function getRoster(teamAbbr: string): Promise<string[]> {
+  const cached = rosterCache.get(teamAbbr);
+  if (cached && Date.now() - cached.fetchedAt < ROSTER_TTL_MS) {
+    return cached.players;
+  }
+  try {
+    const ids = await getTeamIds();
+    const teamId = ids.get(teamAbbr);
+    if (!teamId) return [];
+
+    // Free tier: /players supports team_ids[] filter, returns active roster.
+    const url = `${BDL_BASE}/players?team_ids[]=${teamId}&per_page=100`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`Roster fetch failed for ${teamAbbr}: ${resp.status}`);
+      return cached?.players ?? [];
+    }
+    const data = await resp.json();
+    const players: string[] = (data.data ?? [])
+      .map((p: any) => {
+        const name = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+        const pos = p.position ? ` (${p.position})` : "";
+        return name ? `${name}${pos}` : null;
+      })
+      .filter(Boolean) as string[];
+
+    rosterCache.set(teamAbbr, { players, fetchedAt: Date.now() });
+    return players;
+  } catch (e) {
+    console.warn(`Roster lookup error for ${teamAbbr}:`, e);
+    return cached?.players ?? [];
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
