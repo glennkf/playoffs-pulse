@@ -152,9 +152,23 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
 
         {/* Prediction */}
         <div className="rounded-lg bg-secondary/40 border border-border/60 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">AI Series Prediction</span>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">AI Series Prediction</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              onClick={() => setRefreshKey((k) => k + 1)}
+              disabled={loading}
+              aria-label="Regenerate prediction with fresh roster"
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${loading ? "animate-spin" : ""}`} />
+              Regenerate
+            </Button>
           </div>
 
           {loading && (
