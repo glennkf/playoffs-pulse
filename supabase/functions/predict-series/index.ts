@@ -243,9 +243,10 @@ Deno.serve(async (req) => {
         const t = await resp.text();
         console.error("Gateway error", resp.status, t);
         if (resp.status === 429) {
-          return new Response(JSON.stringify({ error: "Rate limit hit. Try again in a moment." }), {
-            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ error: "Rate limit hit. Retrying in a moment.", retryable: true, retryAfterMs: 8000 }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
         }
         if (resp.status === 402) {
           return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Lovable workspace settings." }), {

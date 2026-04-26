@@ -18,17 +18,19 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Module-level serial queue: only one request to the AI gateway in flight
 // at a time, with spacing + retry, so 8 cards never hammer the rate limit.
 let queue: Promise<unknown> = Promise.resolve();
-const REQUEST_SPACING_MS = 1200;
+const REQUEST_SPACING_MS = 6500;
 
 async function enqueuePrediction(body: unknown): Promise<Prediction> {
   const run = async (): Promise<Prediction> => {
-    const maxAttempts = 5;
+    const maxAttempts = 8;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const { data, error } = await supabase.functions.invoke("predict-series", { body });
-      const payloadErr = (data as { error?: string } | null)?.error;
+      const payload = data as ({ error?: string; retryable?: boolean; retryAfterMs?: number } & Partial<Prediction>) | null;
+      const payloadErr = payload?.error;
       const status = (error as { context?: { status?: number } } | null)?.context?.status;
       const isRateLimit =
         status === 429 ||
+        payload?.retryable === true ||
         /rate limit/i.test(payloadErr ?? "") ||
         /rate limit/i.test(error?.message ?? "");
 
@@ -38,7 +40,7 @@ async function enqueuePrediction(body: unknown): Promise<Prediction> {
       }
 
       if (isRateLimit && attempt < maxAttempts - 1) {
-        await sleep(2500 * Math.pow(2, attempt) + Math.random() * 500);
+        await sleep(payload?.retryAfterMs ?? (8000 * Math.pow(1.5, attempt) + Math.random() * 1000));
         continue;
       }
 
