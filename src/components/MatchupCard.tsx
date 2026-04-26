@@ -1,9 +1,10 @@
 import { Matchup, TEAMS } from "@/data/playoffs";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Sparkles, TrendingUp, AlertCircle } from "lucide-react";
+import { Sparkles, TrendingUp, AlertCircle, RefreshCw } from "lucide-react";
 
 type Prediction = {
   winnerAbbr: string;
