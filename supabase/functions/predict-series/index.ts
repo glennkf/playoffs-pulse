@@ -7,6 +7,61 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const BDL_BASE = "https://api.balldontlie.io/v1";
+
+// In-memory cache (per edge function instance) for team rosters.
+// Key: team abbreviation (e.g. "BOS"). TTL: 15 minutes.
+type RosterCache = { players: string[]; fetchedAt: number };
+const ROSTER_TTL_MS = 15 * 60 * 1000;
+const rosterCache = new Map<string, RosterCache>();
+let teamIdCache: Map<string, number> | null = null;
+
+async function getTeamIds(): Promise<Map<string, number>> {
+  if (teamIdCache) return teamIdCache;
+  const resp = await fetch(`${BDL_BASE}/teams`);
+  if (!resp.ok) throw new Error(`BallDontLie teams fetch failed: ${resp.status}`);
+  const data = await resp.json();
+  const map = new Map<string, number>();
+  for (const t of data.data ?? []) {
+    if (t.abbreviation && typeof t.id === "number") map.set(t.abbreviation, t.id);
+  }
+  teamIdCache = map;
+  return map;
+}
+
+async function getRoster(teamAbbr: string): Promise<string[]> {
+  const cached = rosterCache.get(teamAbbr);
+  if (cached && Date.now() - cached.fetchedAt < ROSTER_TTL_MS) {
+    return cached.players;
+  }
+  try {
+    const ids = await getTeamIds();
+    const teamId = ids.get(teamAbbr);
+    if (!teamId) return [];
+
+    // Free tier: /players supports team_ids[] filter, returns active roster.
+    const url = `${BDL_BASE}/players?team_ids[]=${teamId}&per_page=100`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`Roster fetch failed for ${teamAbbr}: ${resp.status}`);
+      return cached?.players ?? [];
+    }
+    const data = await resp.json();
+    const players: string[] = (data.data ?? [])
+      .map((p: any) => {
+        const name = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+        const pos = p.position ? ` (${p.position})` : "";
+        return name ? `${name}${pos}` : null;
+      })
+      .filter(Boolean) as string[];
+
+    rosterCache.set(teamAbbr, { players, fetchedAt: Date.now() });
+    return players;
+  } catch (e) {
+    console.warn(`Roster lookup error for ${teamAbbr}:`, e);
+    return cached?.players ?? [];
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -32,11 +87,21 @@ Deno.serve(async (req) => {
         };
       };
 
+      // Fetch live rosters in parallel from BallDontLie (cached per instance).
+      const [highRoster, lowRoster] = await Promise.all([
+        getRoster(matchup.highTeam),
+        getRoster(matchup.lowTeam),
+      ]);
+      const fmtRoster = (abbr: string, players: string[]) =>
+        players.length
+          ? `${abbr} active roster: ${players.slice(0, 18).join(", ")}.`
+          : `${abbr} roster: unavailable — rely on general knowledge.`;
+
       messages = [
         {
           role: "system",
           content:
-            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
+            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). ONLY reference players that appear in the rosters provided in the user message — do not invent or use outdated rosters. Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
         },
         {
           role: "user",
@@ -44,8 +109,12 @@ Deno.serve(async (req) => {
             `2026 NBA Playoffs ${matchup.conf}ern Conference 1st Round.\n` +
             `(${matchup.highSeed}) ${matchup.highTeam} [${matchup.highRecord}] vs ` +
             `(${matchup.lowSeed}) ${matchup.lowTeam} [${matchup.lowRecord}].\n` +
-            `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n` +
-            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period.`,
+            `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n\n` +
+            `CURRENT ROSTERS (from BallDontLie API):\n` +
+            `${fmtRoster(matchup.highTeam, highRoster)}\n` +
+            `${fmtRoster(matchup.lowTeam, lowRoster)}\n` +
+            `Note: Injury data not available — assume listed players are healthy unless widely known otherwise.\n\n` +
+            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period. Reference only players from the rosters above.`,
         },
       ];
 
