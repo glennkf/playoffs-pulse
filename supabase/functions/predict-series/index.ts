@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
         {
           role: "system",
           content:
-            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Keep bullets punchy (max 18 words each).",
+            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
         },
         {
           role: "user",
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
             `(${matchup.highSeed}) ${matchup.highTeam} [${matchup.highRecord}] vs ` +
             `(${matchup.lowSeed}) ${matchup.lowTeam} [${matchup.lowRecord}].\n` +
             `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n` +
-            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets.`,
+            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period.`,
         },
       ];
 
@@ -111,49 +111,122 @@ Deno.serve(async (req) => {
       });
     }
 
-    const resp = await fetch(GATEWAY_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
-        tools,
-        tool_choice,
-      }),
-    });
+    const isCompleteSentence = (s: unknown): s is string => {
+      if (typeof s !== "string") return false;
+      const trimmed = s.trim();
+      if (trimmed.length < 20) return false;
+      // Must end with terminal punctuation
+      if (!/[.!?]$/.test(trimmed)) return false;
+      // Reject obvious fragments / trailing conjunctions
+      if (/\b(and|but|or|because|with|to|of|the|a|an|for|in|on)[.!?]$/i.test(trimmed)) return false;
+      // Must contain at least one space (i.e., multiple words)
+      if (!/\s/.test(trimmed)) return false;
+      // Must start with a capital letter
+      if (!/^[A-Z"']/.test(trimmed)) return false;
+      return true;
+    };
 
-    if (!resp.ok) {
-      const t = await resp.text();
-      console.error("Gateway error", resp.status, t);
-      if (resp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit hit. Try again in a moment." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const isValidPrediction = (args: any): boolean => {
+      if (!args || typeof args !== "object") return false;
+      if (typeof args.winnerAbbr !== "string" || args.winnerAbbr.length < 2) return false;
+      if (typeof args.inGames !== "number" || args.inGames < 4 || args.inGames > 7) return false;
+      if (typeof args.confidence !== "number") return false;
+      if (!Array.isArray(args.reasoning) || args.reasoning.length !== 3) return false;
+      return args.reasoning.every(isCompleteSentence);
+    };
+
+    const callGateway = async () => {
+      return await fetch(GATEWAY_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages,
+          tools,
+          tool_choice,
+          temperature: 0.7,
+        }),
+      });
+    };
+
+    const maxValidationRetries = mode === "predict" ? 3 : 1;
+    let lastArgs: any = null;
+    let lastError: string | null = null;
+
+    for (let attempt = 0; attempt < maxValidationRetries; attempt++) {
+      const resp = await callGateway();
+
+      if (!resp.ok) {
+        const t = await resp.text();
+        console.error("Gateway error", resp.status, t);
+        if (resp.status === 429) {
+          return new Response(JSON.stringify({ error: "Rate limit hit. Try again in a moment." }), {
+            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (resp.status === 402) {
+          return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Lovable workspace settings." }), {
+            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: `AI gateway error: ${resp.status}` }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (resp.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Lovable workspace settings." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+
+      const data = await resp.json();
+      const call = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (!call) {
+        console.error("No tool call in response", JSON.stringify(data));
+        lastError = "No tool call in response";
+        continue;
       }
-      return new Response(JSON.stringify({ error: `AI gateway error: ${resp.status}` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+
+      let args: any;
+      try {
+        args = JSON.parse(call.function.arguments);
+      } catch (parseErr) {
+        console.error("Failed to parse tool args", parseErr);
+        lastError = "Invalid AI response format";
+        continue;
+      }
+
+      lastArgs = args;
+
+      if (mode === "predict") {
+        if (isValidPrediction(args)) {
+          return new Response(JSON.stringify(args), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        console.warn(
+          `Validation failed (attempt ${attempt + 1}/${maxValidationRetries}):`,
+          JSON.stringify(args.reasoning),
+        );
+        lastError = "Incomplete prediction bullets";
+        // Nudge the model on retry
+        messages.push({
+          role: "user",
+          content:
+            "Your previous response had incomplete or fragmented bullets. Regenerate with EXACTLY 3 reasoning bullets, each a complete sentence (10-18 words) ending in a period.",
+        });
+        continue;
+      }
+
+      // rebut mode — return as-is
+      return new Response(JSON.stringify(args), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const data = await resp.json();
-    const call = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!call) {
-      console.error("No tool call in response", JSON.stringify(data));
-      throw new Error("No tool call in response");
-    }
-    const args = JSON.parse(call.function.arguments);
-
-    return new Response(JSON.stringify(args), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("Exhausted validation retries", lastError, JSON.stringify(lastArgs));
+    return new Response(
+      JSON.stringify({ error: lastError ?? "Could not generate a complete prediction. Please retry." }),
+      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (e) {
     console.error("predict-series error", e);
     return new Response(
