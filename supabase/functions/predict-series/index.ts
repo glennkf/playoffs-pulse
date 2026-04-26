@@ -93,6 +93,12 @@ Deno.serve(async (req) => {
       };
 
       // Fetch live rosters in parallel from BallDontLie (cached per instance).
+      // Client can pass forceRefreshRoster:true to bypass the cache.
+      const forceRefresh = body.forceRefreshRoster === true;
+      if (forceRefresh) {
+        rosterCache.delete(matchup.highTeam);
+        rosterCache.delete(matchup.lowTeam);
+      }
       const [highRoster, lowRoster] = await Promise.all([
         getRoster(matchup.highTeam),
         getRoster(matchup.lowTeam),

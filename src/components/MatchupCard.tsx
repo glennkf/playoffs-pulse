@@ -1,9 +1,10 @@
 import { Matchup, TEAMS } from "@/data/playoffs";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Sparkles, TrendingUp, AlertCircle } from "lucide-react";
+import { Sparkles, TrendingUp, AlertCircle, RefreshCw } from "lucide-react";
 
 type Prediction = {
   winnerAbbr: string;
@@ -59,6 +60,7 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
   const [pred, setPred] = useState<Prediction | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -71,6 +73,8 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
         lowTeam: low.abbr, lowSeed: matchup.lowSeed, lowRecord: low.record,
         series: matchup.series,
       },
+      // On manual regenerate, force the edge function to bypass its roster cache.
+      forceRefreshRoster: refreshKey > 0,
     };
 
     setLoading(true);
@@ -89,7 +93,7 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
       });
 
     return () => { alive = false; };
-  }, [matchup.id]);
+  }, [matchup.id, refreshKey]);
 
   const winner = pred?.winnerAbbr === high.abbr ? high : pred?.winnerAbbr === low.abbr ? low : null;
   const seriesLeader =
@@ -148,9 +152,23 @@ export const MatchupCard = ({ matchup, index = 0 }: { matchup: Matchup; index?: 
 
         {/* Prediction */}
         <div className="rounded-lg bg-secondary/40 border border-border/60 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">AI Series Prediction</span>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">AI Series Prediction</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              onClick={() => setRefreshKey((k) => k + 1)}
+              disabled={loading}
+              aria-label="Regenerate prediction with fresh roster"
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${loading ? "animate-spin" : ""}`} />
+              Regenerate
+            </Button>
           </div>
 
           {loading && (
