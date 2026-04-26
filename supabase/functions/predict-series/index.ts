@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
         {
           role: "system",
           content:
-            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Keep bullets punchy (max 18 words each).",
+            "You are a sharp, opinionated NBA analyst. Predict 1st-round series outcomes given current series score and team context. Be decisive. Use real basketball reasoning (matchups, depth, coaching, momentum). Each reasoning bullet MUST be a complete, grammatically correct sentence ending with a period. Bullets should be 8-18 words each. Never truncate or leave a bullet as a sentence fragment.",
         },
         {
           role: "user",
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
             `(${matchup.highSeed}) ${matchup.highTeam} [${matchup.highRecord}] vs ` +
             `(${matchup.lowSeed}) ${matchup.lowTeam} [${matchup.lowRecord}].\n` +
             `Current series: ${matchup.highTeam} ${matchup.series.highWins}-${matchup.series.lowWins} ${matchup.lowTeam}.\n` +
-            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets.`,
+            `Predict the series winner, in how many games, with confidence % (50-99) and exactly 3 reasoning bullets. Each bullet MUST be a complete sentence ending with a period.`,
         },
       ];
 
